@@ -1,12 +1,12 @@
 // ==UserScript==
-// @name         ChatGPT Session导入（完整JSON两次拼接版）
+// @name         ChatGPT Session导入（JSON两次拼接-调试兜底版）
 // @namespace    http://violentmonkey.net/
-// @version      1.0
-// @description  分两次粘贴完整JSON前后段，自动拼接解析写入Cookie
+// @version      1.2
+// @description  分两次粘贴JSON，全程弹窗提示，自动兼容API，失败强制降级
 // @match        https://chatgpt.com/*
 // @run-at       document-end
 // @grant        GM.cookie
-// @grant        GM.notification
+// @grant        GM_notification
 // ==/UserScript==
 
 (function() {
@@ -16,7 +16,13 @@
     const COOKIE_PATH = "/";
     const COOKIE_SAMESITE = "lax";
 
-    // 移动端悬浮按钮
+    // 自动兼容两种API命名（点语法/下划线语法）
+    const getCookieApi = () => {
+        if (typeof GM?.cookie?.set === "function") return GM.cookie;
+        if (typeof GM_cookie?.set === "function") return GM_cookie;
+        return null;
+    };
+
     function createFloatButton() {
         if(document.getElementById('gptSessionImportBtn')) return;
         const btn = document.createElement('button');
@@ -31,12 +37,12 @@
         bindClickEvent(btn);
     }
 
-    // JSON清洗修复（自动去换行、提取有效JSON、补全闭合括号）
+    // JSON清洗修复（去空白、提取有效结构、补全闭合括号）
     function cleanAndParseJSON(rawStr) {
-        let clean = rawStr.replace(/[\n\r\t]/g, "");
+        let clean = rawStr.replace(/[\n\r\t\s]/g, "");
         const start = clean.indexOf('{');
         const end = clean.lastIndexOf('}');
-        if (start === -1 || end === -1) throw new Error("未检测到JSON结构，请确认粘贴内容正确");
+        if (start === -1 || end === -1) throw new Error("两段拼接后未找到JSON结构，请确认拆分位置正确");
         clean = clean.slice(start, end + 1);
         // 自动补全缺失的闭合括号
         let openCount = (clean.match(/\{/g) || []).length;
@@ -45,76 +51,83 @@
         try {
             return JSON.parse(clean);
         } catch (e) {
-            throw new Error("JSON拼接后格式损坏，请调整拆分位置重新粘贴");
+            throw new Error("JSON格式损坏，请调整拆分位置，从逗号/引号处断开再重试");
         }
     }
 
-    // Token分片校验
+    // Token分片
     function splitSessionToken(fullStr) {
         const chunk0 = fullStr.slice(0, SPLIT_MAX);
         const chunk1 = fullStr.slice(SPLIT_MAX);
-        if (chunk0 + chunk1 !== fullStr) alert("分片警告：Token存在截断丢失");
         return [chunk0, chunk1];
     }
 
     // 写入Cookie核心逻辑
-    async function writeCookies(chunk0, chunk1, expireTime) {
-        // 清理旧Cookie
+    async function writeCookies(cookieApi, chunk0, chunk1, expireSec) {
         try {
-            await GM.cookie.delete({name:"__Secure-next-auth.session-token0", domain:COOKIE_DOMAIN, path:COOKIE_PATH});
-            await GM.cookie.delete({name:"__Secure-next-auth.session-token1", domain:COOKIE_DOMAIN, path:COOKIE_PATH});
-        } catch(e) { console.warn("旧Cookie清理失败，跳过", e); }
+            await cookieApi.delete({name:"__Secure-next-auth.session-token0", domain:COOKIE_DOMAIN, path:COOKIE_PATH});
+            await cookieApi.delete({name:"__Secure-next-auth.session-token1", domain:COOKIE_DOMAIN, path:COOKIE_PATH});
+        } catch(e) { console.warn("旧Cookie清理失败", e); }
 
-        // 写入两条分片Cookie
-        await GM.cookie.set({
+        await cookieApi.set({
             name:"__Secure-next-auth.session-token0", value:chunk0,
             domain:COOKIE_DOMAIN, path:COOKIE_PATH, secure:true,
-            sameSite:COOKIE_SAMESITE, httpOnly:true, expirationDate:expireTime
+            sameSite:COOKIE_SAMESITE, httpOnly:true, expirationDate:expireSec
         });
-        await GM.cookie.set({
+        await cookieApi.set({
             name:"__Secure-next-auth.session-token1", value:chunk1,
             domain:COOKIE_DOMAIN, path:COOKIE_PATH, secure:true,
-            sameSite:COOKIE_SAMESITE, httpOnly:true, expirationDate:expireTime
+            sameSite:COOKIE_SAMESITE, httpOnly:true, expirationDate:expireSec
         });
-
-        try { GM.notification({title:"导入成功", text:"3秒后自动刷新登录"}); }
-        catch(e) { alert("导入成功，3秒后自动刷新"); }
-        setTimeout(()=>location.reload(), 3000);
     }
 
-    // 点击主逻辑：两次粘贴拼接JSON
     function bindClickEvent(btn) {
         btn.addEventListener('click', async ()=>{
             try {
-                const jsonPart1 = prompt("第1步：粘贴完整JSON的前半段");
-                if(!jsonPart1?.trim()) return;
-                const jsonPart2 = prompt("第2步：粘贴完整JSON的后半段");
-                if(!jsonPart2?.trim()) return;
+                // 两次输入
+                const part1 = prompt("【1/2】粘贴完整JSON的前半段");
+                if(!part1?.trim()) return;
+                const part2 = prompt("【2/2】粘贴完整JSON的后半段");
+                if(!part2?.trim()) return;
 
-                // 拼接两段完整JSON
-                const fullJsonStr = jsonPart1.trim() + jsonPart2.trim();
-                // 清洗+解析JSON
-                const sessionData = cleanAndParseJSON(fullJsonStr);
+                alert("正在拼接并解析JSON...");
+                const fullJson = part1.trim() + part2.trim();
+                const sessionData = cleanAndParseJSON(fullJson);
                 const fullToken = sessionData.sessionToken;
                 if(!fullToken) throw new Error("JSON中未找到sessionToken字段");
                 const expireSec = Math.floor(new Date(sessionData.expires).getTime() / 1000);
                 const [c0, c1] = splitSessionToken(fullToken);
 
-                // 检测GM权限，不可用则降级手动复制
-                if(typeof GM?.cookie?.set === "function") {
-                    await writeCookies(c0, c1, expireSec);
+                alert("JSON解析成功，正在尝试写入Cookie...");
+                const cookieApi = getCookieApi();
+                
+                if (cookieApi) {
+                    try {
+                        await writeCookies(cookieApi, c0, c1, expireSec);
+                        alert("✅ 写入成功！3秒后自动刷新页面登录");
+                        setTimeout(()=>location.reload(), 3000);
+                        return;
+                    } catch (writeErr) {
+                        alert("❌ Cookie自动写入失败，已降级为手动复制模式\n\n错误原因：" + writeErr.message);
+                    }
                 } else {
-                    alert(`Cookie权限不可用，手动复制两段新建Cookie：\n\n=== token0 ===\n${c0}\n\n=== token1 ===\n${c1}`);
+                    alert("⚠️ 未检测到Cookie写入权限，进入手动复制模式");
                 }
+
+                // 强制降级：弹窗输出两段Token，手动新建
+                alert(`请手动复制两段新建Cookie：\n\n=== token0（前4000字符）===\n${c0}\n\n=== token1（剩余字符）===\n${c1}\n\n固定参数：域.chatgpt.com、路径/、勾选Secure和HttpOnly、SameSite选Lax`);
+
             } catch(err) {
-                alert("处理失败：" + err.message);
+                alert("❌ 处理失败：" + err.message);
                 console.error(err);
             }
         });
     }
 
     // 加载按钮
-    document.readyState === "loading"
-        ? document.addEventListener('DOMContentLoaded', createFloatButton)
-        : createFloatButton();
+    if (document.readyState === "loading") {
+        document.addEventListener('DOMContentLoaded', createFloatButton);
+    } else {
+        createFloatButton();
+    }
 })();
