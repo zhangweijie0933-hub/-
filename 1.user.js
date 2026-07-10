@@ -1,89 +1,197 @@
 // ==UserScript==
-// @name         ChatGPT Session 一键导入工具 (Violentmonkey)
+// @name         ChatGPT Session一键导入(暴力猴手机版)
 // @namespace    http://tampermonkey.net/
-// @version      1.3
-// @description  粘贴 session 接口 JSON，自动拆分并写入登录 Cookie（适配 Kiwi 暴力猴）
+// @version      2.0
+// @description  适配Kiwi+暴力猴，粘贴session JSON自动拆分写入Cookie
 // @author       You
 // @match        https://chatgpt.com/*
 // @grant        GM_cookie
 // @grant        GM_notification
-// @license      MIT
+// @run-at       document-end
 // ==/UserScript==
 
 (function() {
     'use strict';
-
     const SPLIT_MAX = 4000;
     const COOKIE_DOMAIN = ".chatgpt.com";
     const COOKIE_PATH = "/";
     const COOKIE_SAMESITE = "lax";
 
-    // ---------- 创建浮动按钮 ----------
+    // ========== 1. 创建移动端友好的悬浮按钮 ==========
     function createFloatButton() {
-        if (document.getElementById('gptSessionImportBtn')) return;
+        if(document.getElementById('gptSessionImportBtn')) return;
         const floatBtn = document.createElement('button');
         floatBtn.id = 'gptSessionImportBtn';
-        floatBtn.innerText = '导入 Session';
+        floatBtn.innerText = '导入Session';
         Object.assign(floatBtn.style, {
             position: 'fixed',
-            top: '120px',
-            right: '20px',
-            zIndex: '99999',
-            padding: '14px 20px',
+            top: '80px',
+            right: '16px',
+            zIndex: '999999',
+            padding: '12px 16px',
             background: '#10a37f',
             color: '#fff',
             border: 'none',
-            borderRadius: '10px',
+            borderRadius: '8px',
             cursor: 'pointer',
             fontWeight: 'bold',
             fontSize: '16px',
-            boxShadow: '0 4px 8px rgba(0,0,0,0.3)',
-            touchAction: 'manipulation'
+            boxShadow: '0 2px 8px rgba(0,0,0,0.2)'
         });
         document.body.appendChild(floatBtn);
-        bindClickEvent(floatBtn);
+        floatBtn.addEventListener('click', showInputModal);
     }
 
-    // ---------- Token 分片 ----------
+    // ========== 2. 自定义长文本输入弹窗(解决字数限制) ==========
+    function showInputModal() {
+        // 遮罩层
+        const mask = document.createElement('div');
+        mask.id = 'sessionImportMask';
+        Object.assign(mask.style, {
+            position: 'fixed',
+            top: '0', left: '0',
+            width: '100%', height: '100%',
+            background: 'rgba(0,0,0,0.5)',
+            zIndex: '9999999',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '20px',
+            boxSizing: 'border-box'
+        });
+
+        // 弹窗容器
+        const modal = document.createElement('div');
+        Object.assign(modal.style, {
+            background: '#fff',
+            borderRadius: '10px',
+            width: '100%',
+            maxWidth: '500px',
+            padding: '20px',
+            boxSizing: 'border-box'
+        });
+
+        // 标题
+        const title = document.createElement('h3');
+        title.innerText = '粘贴Session完整JSON';
+        title.style.margin = '0 0 12px 0';
+
+        // 多行输入框(无字数限制)
+        const textarea = document.createElement('textarea');
+        textarea.placeholder = '在此粘贴 https://chatgpt.com/api/auth/session 返回的全部内容';
+        Object.assign(textarea.style, {
+            width: '100%',
+            height: '180px',
+            padding: '10px',
+            border: '1px solid #ddd',
+            borderRadius: '6px',
+            fontSize: '14px',
+            boxSizing: 'border-box',
+            marginBottom: '12px',
+            wordBreak: 'break-all'
+        });
+
+        // 按钮组
+        const btnWrap = document.createElement('div');
+        Object.assign(btnWrap.style, {
+            display: 'flex',
+            gap: '10px',
+            justifyContent: 'flex-end'
+        });
+
+        const cancelBtn = document.createElement('button');
+        cancelBtn.innerText = '取消';
+        Object.assign(cancelBtn.style, {
+            padding: '8px 16px',
+            border: '1px solid #ddd',
+            background: '#f5f5f5',
+            borderRadius: '6px',
+            cursor: 'pointer'
+        });
+        cancelBtn.onclick = () => document.body.removeChild(mask);
+
+        const confirmBtn = document.createElement('button');
+        confirmBtn.innerText = '确认导入';
+        Object.assign(confirmBtn.style, {
+            padding: '8px 16px',
+            border: 'none',
+            background: '#10a37f',
+            color: '#fff',
+            borderRadius: '6px',
+            cursor: 'pointer'
+        });
+        confirmBtn.onclick = () => {
+            const input = textarea.value.trim();
+            if (!input) {
+                showTip('请粘贴完整内容', 'error');
+                return;
+            }
+            handleSessionInput(input);
+            document.body.removeChild(mask);
+        };
+
+        btnWrap.appendChild(cancelBtn);
+        btnWrap.appendChild(confirmBtn);
+        modal.appendChild(title);
+        modal.appendChild(textarea);
+        modal.appendChild(btnWrap);
+        mask.appendChild(modal);
+        document.body.appendChild(mask);
+        textarea.focus();
+    }
+
+    // ========== 3. 页面内轻提示(替代系统通知) ==========
+    function showTip(text, type = 'success') {
+        const tip = document.createElement('div');
+        tip.innerText = text;
+        const bgColor = type === 'error' ? '#e53935' : '#10a37f';
+        Object.assign(tip.style, {
+            position: 'fixed',
+            top: '40%',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            background: bgColor,
+            color: '#fff',
+            padding: '12px 20px',
+            borderRadius: '8px',
+            zIndex: '10000000',
+            fontSize: '14px',
+            boxShadow: '0 2px 12px rgba(0,0,0,0.2)'
+        });
+        document.body.appendChild(tip);
+        setTimeout(() => tip.remove(), 2500);
+    }
+
+    // ========== 4. Token拆分逻辑 ==========
     function splitSessionToken(fullStr) {
         const chunk0 = fullStr.slice(0, SPLIT_MAX);
         const chunk1 = fullStr.slice(SPLIT_MAX);
+        // 校验完整性
         if (chunk0.length + chunk1.length !== fullStr.length) {
-            GM_notification({ title: "分片警告", text: "Token 截断丢失字符" });
+            showTip('Token分片丢失字符，请检查内容', 'error');
         }
         return [chunk0, chunk1];
     }
 
-    // ---------- 设置 Cookie（带详细日志） ----------
+    // ========== 5. 兼容暴力猴的Cookie设置 ==========
     async function setSessionCookies(chunk0, chunk1, expireTime) {
-        console.log("=== 开始设置 Cookie ===");
-        console.log("chunk0 长度:", chunk0.length);
-        console.log("chunk1 长度:", chunk1.length);
-        console.log("expireTime (秒):", expireTime);
-
-        // 删除旧 Cookie
+        // 先清理旧Cookie
         try {
             await GM_cookie.delete({
                 name: "__Secure-next-auth.session-token0",
                 domain: COOKIE_DOMAIN,
                 path: COOKIE_PATH
             });
-            console.log("已删除 token0");
-        } catch (e) {
-            console.error("删除 token0 失败:", e);
-        }
-
-        try {
             await GM_cookie.delete({
                 name: "__Secure-next-auth.session-token1",
                 domain: COOKIE_DOMAIN,
                 path: COOKIE_PATH
             });
-            console.log("已删除 token1");
         } catch (e) {
-            console.error("删除 token1 失败:", e);
+            console.warn('清理旧Cookie失败，继续写入：', e);
         }
 
+        // 批量写入新Cookie
         const cookieList = [
             { name: "__Secure-next-auth.session-token0", value: chunk0 },
             { name: "__Secure-next-auth.session-token1", value: chunk1 }
@@ -91,54 +199,60 @@
 
         for (const item of cookieList) {
             try {
-                const result = await GM_cookie.set({
+                await GM_cookie.set({
                     name: item.name,
                     value: item.value,
                     domain: COOKIE_DOMAIN,
                     path: COOKIE_PATH,
                     secure: true,
                     sameSite: COOKIE_SAMESITE,
-                    httpOnly: true,   // 如果还是写不进去，可改为 false 测试
+                    httpOnly: true,
                     expiration: expireTime
                 });
-                console.log(`✅ ${item.name} 设置成功，返回:`, result);
             } catch (err) {
-                console.error(`❌ ${item.name} 设置失败:`, err);
-                GM_notification({ title: "Cookie 写入失败", text: err.message || "未知错误" });
+                console.error(`写入Cookie ${item.name} 失败：`, err);
+                // 降级尝试：去掉httpOnly再试一次
+                try {
+                    await GM_cookie.set({
+                        name: item.name,
+                        value: item.value,
+                        domain: COOKIE_DOMAIN,
+                        path: COOKIE_PATH,
+                        secure: true,
+                        sameSite: COOKIE_SAMESITE,
+                        expiration: expireTime
+                    });
+                } catch (e2) {
+                    throw new Error(`Cookie写入失败: ${item.name}`);
+                }
             }
         }
-
-        GM_notification({ title: "✅ 导入完成", text: "3 秒后自动刷新" });
-        setTimeout(() => window.location.reload(), 3000);
     }
 
-    // ---------- 按钮点击逻辑 ----------
-    function bindClickEvent(btn) {
-        btn.addEventListener('click', async () => {
-            // 此处使用 prompt，未做任何修改
-            const rawInput = prompt("粘贴 https://chatgpt.com/api/auth/session 的完整 JSON 内容：");
-            if (!rawInput?.trim()) return;
+    // ========== 6. 主处理逻辑 ==========
+    async function handleSessionInput(rawInput) {
+        try {
+            // 提取有效JSON
+            const cleanText = rawInput.replace(/[\n\r\s]+/g, " ").match(/\{.*\}/)?.[0];
+            if (!cleanText) throw new Error("未检测到合法JSON，请粘贴完整接口返回内容");
 
-            try {
-                const cleanText = rawInput.replace(/[\n\r]/g, "").match(/\{.*\}/)?.[0];
-                if (!cleanText) throw new Error("未检测到合法 JSON");
+            const sessionData = JSON.parse(cleanText);
+            const fullToken = sessionData.sessionToken;
+            if (!fullToken) throw new Error("JSON中找不到sessionToken字段");
 
-                const sessionData = JSON.parse(cleanText);
-                const fullToken = sessionData.sessionToken;
-                if (!fullToken) throw new Error("JSON 中未找到 sessionToken");
+            const [c0, c1] = splitSessionToken(fullToken);
+            const expireTs = Math.floor(new Date(sessionData.expires).getTime() / 1000);
 
-                const [c0, c1] = splitSessionToken(fullToken);
-                const expireTs = Math.floor(new Date(sessionData.expires).getTime() / 1000);
-                await setSessionCookies(c0, c1, expireTs);
-
-            } catch (err) {
-                GM_notification({ title: "❌ 处理失败", text: err.message });
-                console.error("Session 导入错误：", err);
-            }
-        });
+            await setSessionCookies(c0, c1, expireTs);
+            showTip('导入成功，3秒后自动刷新');
+            setTimeout(() => window.location.reload(), 3000);
+        } catch (err) {
+            showTip('失败: ' + err.message, 'error');
+            console.error("Session导入错误：", err);
+        }
     }
 
-    // ---------- 启动 ----------
+    // ========== 初始化 ==========
     if (document.readyState === "loading") {
         document.addEventListener('DOMContentLoaded', createFloatButton);
     } else {
