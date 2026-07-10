@@ -1,124 +1,87 @@
 // ==UserScript==
-// @name         ChatGPT Session一键导入(暴力猴手机版)
+// @name         ChatGPT Session导入(暴力猴调试版)
 // @namespace    http://tampermonkey.net/
-// @version      2.0
-// @description  适配Kiwi+暴力猴，粘贴session JSON自动拆分写入Cookie
+// @version      2.1
+// @description  Kiwi+暴力猴兼容版，带完整调试日志
 // @author       You
 // @match        https://chatgpt.com/*
 // @grant        GM_cookie
-// @grant        GM_notification
 // @run-at       document-end
 // ==/UserScript==
 
 (function() {
     'use strict';
+    console.log('✅ Session导入脚本已成功注入页面');
+    
     const SPLIT_MAX = 4000;
-    const COOKIE_DOMAIN = ".chatgpt.com";
+    const COOKIE_DOMAIN = "chatgpt.com"; // 暴力猴兼容：去掉前导点
     const COOKIE_PATH = "/";
     const COOKIE_SAMESITE = "lax";
 
-    // ========== 1. 创建移动端友好的悬浮按钮 ==========
+    // 创建悬浮按钮
     function createFloatButton() {
         if(document.getElementById('gptSessionImportBtn')) return;
         const floatBtn = document.createElement('button');
         floatBtn.id = 'gptSessionImportBtn';
         floatBtn.innerText = '导入Session';
         Object.assign(floatBtn.style, {
-            position: 'fixed',
-            top: '80px',
-            right: '16px',
-            zIndex: '999999',
-            padding: '12px 16px',
-            background: '#10a37f',
-            color: '#fff',
-            border: 'none',
-            borderRadius: '8px',
-            cursor: 'pointer',
-            fontWeight: 'bold',
-            fontSize: '16px',
+            position: 'fixed', top: '80px', right: '16px', zIndex: '999999',
+            padding: '12px 16px', background: '#10a37f', color: '#fff',
+            border: 'none', borderRadius: '8px', fontSize: '16px',
             boxShadow: '0 2px 8px rgba(0,0,0,0.2)'
         });
         document.body.appendChild(floatBtn);
         floatBtn.addEventListener('click', showInputModal);
+        console.log('✅ 导入按钮已渲染到页面');
     }
 
-    // ========== 2. 自定义长文本输入弹窗(解决字数限制) ==========
+    // 自定义长文本输入弹窗
     function showInputModal() {
-        // 遮罩层
         const mask = document.createElement('div');
         mask.id = 'sessionImportMask';
         Object.assign(mask.style, {
-            position: 'fixed',
-            top: '0', left: '0',
-            width: '100%', height: '100%',
-            background: 'rgba(0,0,0,0.5)',
-            zIndex: '9999999',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '20px',
-            boxSizing: 'border-box'
+            position: 'fixed', top: '0', left: '0', width: '100%', height: '100%',
+            background: 'rgba(0,0,0,0.5)', zIndex: '9999999',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            padding: '20px', boxSizing: 'border-box'
         });
 
-        // 弹窗容器
         const modal = document.createElement('div');
         Object.assign(modal.style, {
-            background: '#fff',
-            borderRadius: '10px',
-            width: '100%',
-            maxWidth: '500px',
-            padding: '20px',
-            boxSizing: 'border-box'
+            background: '#fff', borderRadius: '10px', width: '100%',
+            maxWidth: '500px', padding: '20px', boxSizing: 'border-box'
         });
 
-        // 标题
         const title = document.createElement('h3');
         title.innerText = '粘贴Session完整JSON';
         title.style.margin = '0 0 12px 0';
 
-        // 多行输入框(无字数限制)
         const textarea = document.createElement('textarea');
-        textarea.placeholder = '在此粘贴 https://chatgpt.com/api/auth/session 返回的全部内容';
+        textarea.placeholder = '粘贴 /api/auth/session 返回的全部内容';
         Object.assign(textarea.style, {
-            width: '100%',
-            height: '180px',
-            padding: '10px',
-            border: '1px solid #ddd',
-            borderRadius: '6px',
-            fontSize: '14px',
-            boxSizing: 'border-box',
-            marginBottom: '12px',
-            wordBreak: 'break-all'
+            width: '100%', height: '180px', padding: '10px',
+            border: '1px solid #ddd', borderRadius: '6px',
+            fontSize: '14px', boxSizing: 'border-box', marginBottom: '12px'
         });
 
-        // 按钮组
         const btnWrap = document.createElement('div');
         Object.assign(btnWrap.style, {
-            display: 'flex',
-            gap: '10px',
-            justifyContent: 'flex-end'
+            display: 'flex', gap: '10px', justifyContent: 'flex-end'
         });
 
         const cancelBtn = document.createElement('button');
         cancelBtn.innerText = '取消';
         Object.assign(cancelBtn.style, {
-            padding: '8px 16px',
-            border: '1px solid #ddd',
-            background: '#f5f5f5',
-            borderRadius: '6px',
-            cursor: 'pointer'
+            padding: '8px 16px', border: '1px solid #ddd',
+            background: '#f5f5f5', borderRadius: '6px'
         });
         cancelBtn.onclick = () => document.body.removeChild(mask);
 
         const confirmBtn = document.createElement('button');
         confirmBtn.innerText = '确认导入';
         Object.assign(confirmBtn.style, {
-            padding: '8px 16px',
-            border: 'none',
-            background: '#10a37f',
-            color: '#fff',
-            borderRadius: '6px',
-            cursor: 'pointer'
+            padding: '8px 16px', border: 'none',
+            background: '#10a37f', color: '#fff', borderRadius: '6px'
         });
         confirmBtn.onclick = () => {
             const input = textarea.value.trim();
@@ -140,64 +103,49 @@
         textarea.focus();
     }
 
-    // ========== 3. 页面内轻提示(替代系统通知) ==========
+    // 页面内轻提示
     function showTip(text, type = 'success') {
         const tip = document.createElement('div');
         tip.innerText = text;
         const bgColor = type === 'error' ? '#e53935' : '#10a37f';
         Object.assign(tip.style, {
-            position: 'fixed',
-            top: '40%',
-            left: '50%',
-            transform: 'translateX(-50%)',
-            background: bgColor,
-            color: '#fff',
-            padding: '12px 20px',
-            borderRadius: '8px',
-            zIndex: '10000000',
-            fontSize: '14px',
-            boxShadow: '0 2px 12px rgba(0,0,0,0.2)'
+            position: 'fixed', top: '40%', left: '50%',
+            transform: 'translateX(-50%)', background: bgColor,
+            color: '#fff', padding: '12px 20px', borderRadius: '8px',
+            zIndex: '10000000', fontSize: '14px'
         });
         document.body.appendChild(tip);
         setTimeout(() => tip.remove(), 2500);
     }
 
-    // ========== 4. Token拆分逻辑 ==========
+    // Token拆分+校验
     function splitSessionToken(fullStr) {
         const chunk0 = fullStr.slice(0, SPLIT_MAX);
         const chunk1 = fullStr.slice(SPLIT_MAX);
-        // 校验完整性
-        if (chunk0.length + chunk1.length !== fullStr.length) {
-            showTip('Token分片丢失字符，请检查内容', 'error');
-        }
+        console.log('📌 Token拆分完成：第一段长度=' + chunk0.length + ', 第二段长度=' + chunk1.length);
         return [chunk0, chunk1];
     }
 
-    // ========== 5. 兼容暴力猴的Cookie设置 ==========
-    async function setSessionCookies(chunk0, chunk1, expireTime) {
+    // 写入Cookie（暴力猴兼容：优先带HttpOnly，失败自动降级）
+    async function setSessionCookies(chunk0, chunk1) {
         // 先清理旧Cookie
         try {
-            await GM_cookie.delete({
-                name: "__Secure-next-auth.session-token0",
-                domain: COOKIE_DOMAIN,
-                path: COOKIE_PATH
-            });
-            await GM_cookie.delete({
-                name: "__Secure-next-auth.session-token1",
-                domain: COOKIE_DOMAIN,
-                path: COOKIE_PATH
-            });
+            await GM_cookie.delete({name:"__Secure-next-auth.session-token0", domain:COOKIE_DOMAIN, path:COOKIE_PATH});
+            await GM_cookie.delete({name:"__Secure-next-auth.session-token1", domain:COOKIE_DOMAIN, path:COOKIE_PATH});
+            console.log('✅ 旧Cookie清理完成');
         } catch (e) {
-            console.warn('清理旧Cookie失败，继续写入：', e);
+            console.warn('⚠️ 清理旧Cookie失败，继续写入：', e);
         }
 
-        // 批量写入新Cookie
         const cookieList = [
             { name: "__Secure-next-auth.session-token0", value: chunk0 },
             { name: "__Secure-next-auth.session-token1", value: chunk1 }
         ];
 
         for (const item of cookieList) {
+            let writeSuccess = false;
+            
+            // 第一次尝试：带HttpOnly
             try {
                 await GM_cookie.set({
                     name: item.name,
@@ -206,12 +154,16 @@
                     path: COOKIE_PATH,
                     secure: true,
                     sameSite: COOKIE_SAMESITE,
-                    httpOnly: true,
-                    expiration: expireTime
+                    httpOnly: true
                 });
+                writeSuccess = true;
+                console.log(`✅ ${item.name} 写入成功（带HttpOnly）`);
             } catch (err) {
-                console.error(`写入Cookie ${item.name} 失败：`, err);
-                // 降级尝试：去掉httpOnly再试一次
+                console.warn(`⚠️ ${item.name} 带HttpOnly写入失败，尝试降级：`, err);
+            }
+
+            // 降级尝试：不带HttpOnly
+            if (!writeSuccess) {
                 try {
                     await GM_cookie.set({
                         name: item.name,
@@ -219,40 +171,45 @@
                         domain: COOKIE_DOMAIN,
                         path: COOKIE_PATH,
                         secure: true,
-                        sameSite: COOKIE_SAMESITE,
-                        expiration: expireTime
+                        sameSite: COOKIE_SAMESITE
                     });
-                } catch (e2) {
+                    console.log(`✅ ${item.name} 写入成功（降级无HttpOnly）`);
+                } catch (err2) {
+                    console.error(`❌ ${item.name} 最终写入失败：`, err2);
                     throw new Error(`Cookie写入失败: ${item.name}`);
                 }
             }
         }
     }
 
-    // ========== 6. 主处理逻辑 ==========
+    // 主处理逻辑
     async function handleSessionInput(rawInput) {
         try {
+            console.log('📥 接收到输入内容，原始长度：', rawInput.length);
+            
             // 提取有效JSON
             const cleanText = rawInput.replace(/[\n\r\s]+/g, " ").match(/\{.*\}/)?.[0];
-            if (!cleanText) throw new Error("未检测到合法JSON，请粘贴完整接口返回内容");
+            if (!cleanText) throw new Error("未检测到合法JSON格式");
+            console.log('✅ JSON提取成功，有效长度：', cleanText.length);
 
             const sessionData = JSON.parse(cleanText);
             const fullToken = sessionData.sessionToken;
-            if (!fullToken) throw new Error("JSON中找不到sessionToken字段");
+            if (!fullToken) throw new Error("JSON中未找到sessionToken字段");
+            console.log('✅ 成功提取sessionToken，总长度：', fullToken.length);
 
             const [c0, c1] = splitSessionToken(fullToken);
-            const expireTs = Math.floor(new Date(sessionData.expires).getTime() / 1000);
-
-            await setSessionCookies(c0, c1, expireTs);
+            await setSessionCookies(c0, c1);
+            
             showTip('导入成功，3秒后自动刷新');
+            console.log('✅ 全部流程完成，准备刷新页面');
             setTimeout(() => window.location.reload(), 3000);
         } catch (err) {
             showTip('失败: ' + err.message, 'error');
-            console.error("Session导入错误：", err);
+            console.error('❌ 导入流程失败：', err);
         }
     }
 
-    // ========== 初始化 ==========
+    // 初始化
     if (document.readyState === "loading") {
         document.addEventListener('DOMContentLoaded', createFloatButton);
     } else {
