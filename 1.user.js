@@ -1,11 +1,11 @@
 // ==UserScript==
-// @name         ChatGPT Session导入(暴力猴调试版)
+// @name         ChatGPT Session导入(原生Cookie兜底版)
 // @namespace    http://tampermonkey.net/
-// @version      2.1
-// @description  Kiwi+暴力猴兼容版，带完整调试日志
+// @version      3.0
+// @description  Kiwi+暴力猴终极兼容版，原生JS写入Cookie，无权限依赖
 // @author       You
 // @match        https://chatgpt.com/*
-// @grant        GM_cookie
+// @grant        none
 // @run-at       document-end
 // ==/UserScript==
 
@@ -14,9 +14,9 @@
     console.log('✅ Session导入脚本已成功注入页面');
     
     const SPLIT_MAX = 4000;
-    const COOKIE_DOMAIN = "chatgpt.com"; // 暴力猴兼容：去掉前导点
+    const COOKIE_DOMAIN = ".chatgpt.com";
     const COOKIE_PATH = "/";
-    const COOKIE_SAMESITE = "lax";
+    const COOKIE_SAMESITE = "Lax";
 
     // 创建悬浮按钮
     function createFloatButton() {
@@ -35,7 +35,7 @@
         console.log('✅ 导入按钮已渲染到页面');
     }
 
-    // 自定义长文本输入弹窗
+    // 自定义长文本输入弹窗（解决手机端输入字数限制）
     function showInputModal() {
         const mask = document.createElement('div');
         mask.id = 'sessionImportMask';
@@ -126,60 +126,20 @@
         return [chunk0, chunk1];
     }
 
-    // 写入Cookie（暴力猴兼容：优先带HttpOnly，失败自动降级）
-    async function setSessionCookies(chunk0, chunk1) {
-        // 先清理旧Cookie
-        try {
-            await GM_cookie.delete({name:"__Secure-next-auth.session-token0", domain:COOKIE_DOMAIN, path:COOKIE_PATH});
-            await GM_cookie.delete({name:"__Secure-next-auth.session-token1", domain:COOKIE_DOMAIN, path:COOKIE_PATH});
-            console.log('✅ 旧Cookie清理完成');
-        } catch (e) {
-            console.warn('⚠️ 清理旧Cookie失败，继续写入：', e);
-        }
+    // ========== 原生JS写入Cookie（核心兜底，完全不依赖GM API）==========
+    function setSessionCookies(chunk0, chunk1) {
+        // 先删除旧Cookie（参数必须和写入时完全一致才能成功删除）
+        const expirePast = "expires=Thu, 01 Jan 1970 00:00:00 UTC";
+        const baseAttr = `domain=${COOKIE_DOMAIN}; path=${COOKIE_PATH}; secure; SameSite=${COOKIE_SAMESITE}`;
+        
+        document.cookie = `__Secure-next-auth.session-token0=; ${expirePast}; ${baseAttr}`;
+        document.cookie = `__Secure-next-auth.session-token1=; ${expirePast}; ${baseAttr}`;
+        console.log('✅ 旧Cookie已清理');
 
-        const cookieList = [
-            { name: "__Secure-next-auth.session-token0", value: chunk0 },
-            { name: "__Secure-next-auth.session-token1", value: chunk1 }
-        ];
-
-        for (const item of cookieList) {
-            let writeSuccess = false;
-            
-            // 第一次尝试：带HttpOnly
-            try {
-                await GM_cookie.set({
-                    name: item.name,
-                    value: item.value,
-                    domain: COOKIE_DOMAIN,
-                    path: COOKIE_PATH,
-                    secure: true,
-                    sameSite: COOKIE_SAMESITE,
-                    httpOnly: true
-                });
-                writeSuccess = true;
-                console.log(`✅ ${item.name} 写入成功（带HttpOnly）`);
-            } catch (err) {
-                console.warn(`⚠️ ${item.name} 带HttpOnly写入失败，尝试降级：`, err);
-            }
-
-            // 降级尝试：不带HttpOnly
-            if (!writeSuccess) {
-                try {
-                    await GM_cookie.set({
-                        name: item.name,
-                        value: item.value,
-                        domain: COOKIE_DOMAIN,
-                        path: COOKIE_PATH,
-                        secure: true,
-                        sameSite: COOKIE_SAMESITE
-                    });
-                    console.log(`✅ ${item.name} 写入成功（降级无HttpOnly）`);
-                } catch (err2) {
-                    console.error(`❌ ${item.name} 最终写入失败：`, err2);
-                    throw new Error(`Cookie写入失败: ${item.name}`);
-                }
-            }
-        }
+        // 写入新的分片Cookie
+        document.cookie = `__Secure-next-auth.session-token0=${chunk0}; ${baseAttr}`;
+        document.cookie = `__Secure-next-auth.session-token1=${chunk1}; ${baseAttr}`;
+        console.log('✅ 原生Cookie写入完成');
     }
 
     // 主处理逻辑
@@ -198,7 +158,7 @@
             console.log('✅ 成功提取sessionToken，总长度：', fullToken.length);
 
             const [c0, c1] = splitSessionToken(fullToken);
-            await setSessionCookies(c0, c1);
+            setSessionCookies(c0, c1);
             
             showTip('导入成功，3秒后自动刷新');
             console.log('✅ 全部流程完成，准备刷新页面');
